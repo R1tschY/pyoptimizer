@@ -1,0 +1,10 @@
+setup.py
+src/pyoptimizer/__init__.py
+src/pyoptimizer.egg-info/PKG-INFO
+src/pyoptimizer.egg-info/SOURCES.txt
+src/pyoptimizer.egg-info/dependency_links.txt
+src/pyoptimizer.egg-info/top_level.txt
+src/pyoptimizer/ast/__init__.py
+src/pyoptimizer/ast/scope.py
+src/pyoptimizer/optimizations/__init__.py
+src/pyoptimizer/optimizations/constant_resolving.py
