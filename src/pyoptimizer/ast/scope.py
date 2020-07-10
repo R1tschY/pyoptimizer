@@ -1,32 +1,37 @@
 # -*- coding=utf-8 -*-
-import ast
-from ast import AST, AsyncFunctionDef, ClassDef, FunctionDef, Global, ListComp, \
-    Module, Name, \
-    Nonlocal, \
+from ast import AST, AsyncFunctionDef, ClassDef, Del, FunctionDef, Global, \
+    Name, \
+    NodeVisitor, Nonlocal, \
     Store
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 
 @dataclass
 class Scope:
-    local: bool
-    names: List[str] = field(default_factory=list)
+    fn_scope: bool
+    item: Optional[AST]
+    parent: Optional["Scope"]
+    locals_: Dict[str, List[AST]] = field(default_factory=list)
     globals_: List[str] = field(default_factory=list)
     nonlocals_: List[str] = field(default_factory=list)
-    item: Optional[AST] = None
-    parent: Optional["Scope"] = None # TODO
 
     @classmethod
     def new_global(cls, item: Optional[AST] = None):
-        return Scope(local=False, item=item)
+        return Scope(fn_scope=False, item=item, parent=None)
 
     @classmethod
-    def new_local(cls, item: Optional[AST] = None, locals: List[str] = None):
-        return Scope(local=True, item=item, names=locals or [])
+    def new_local(
+            cls, item: Optional[AST], parent: Optional["Scope"],
+            locals: Iterable[str] = ()):
+        return Scope(fn_scope=True, parent=parent, item=item,
+                     locals_=dict.fromkeys(locals))
+
+    def is_class_scope(self):
+        return isinstance(self.item, ClassDef)
 
 
-class ScopingVisitor(ast.NodeVisitor):
+class ScopingVisitor(NodeVisitor):
     current_scope: Scope
 
     def __init__(self):
@@ -35,24 +40,22 @@ class ScopingVisitor(ast.NodeVisitor):
     def visit_Name(self, node: Name) -> Any:
         node._pyo_scope = self.current_scope
 
-        if isinstance(node.ctx, Store):
+        if isinstance(node.ctx, (Store, Del)):
             if node.id not in self.current_scope.globals_ and \
                     node.id not in self.current_scope.nonlocals_:
-                if node.id not in self.current_scope.names:
-                    self.current_scope.names.append(node.id)
-                node._pyo_is_local = True
+                self.current_scope.locals_[node.id] = []
                 return
 
-        node._pyo_is_local = node.id in self.current_scope.names
-
     def visit_Global(self, node: Global) -> Any:
+        node._pyo_scope = self.current_scope
         self.current_scope.globals_.extend(node.names)
 
     def visit_Nonlocal(self, node: Nonlocal) -> Any:
+        node._pyo_scope = self.current_scope
         self.current_scope.nonlocals_.extend(node.names)
 
     def visit_FunctionDef(self, node: FunctionDef) -> Any:
-        self.current_scope.names.append(node.name)
+        self.current_scope.locals_[node.name] = []
 
         node_args = node.args
         args = [arg.arg for arg in node_args.args]
@@ -62,19 +65,23 @@ class ScopingVisitor(ast.NodeVisitor):
         if node_args.kwarg:
             args.append(node_args.kwarg.arg)
 
-        self.visit_scope(node, args)
+        self.visit_scope(node, True, args)
 
     def visit_AsyncFunctionDef(self, node: AsyncFunctionDef) -> Any:
-        self.current_scope.names.append(node.name)
-        self.visit_scope(node)
+        self.current_scope.locals_[node.name] = []
+        self.visit_scope(node, fn_scope=True)
 
     def visit_ClassDef(self, node: ClassDef) -> Any:
-        self.current_scope.names.append(node.name)
+        self.current_scope.locals_[node.name] = []
         self.visit_scope(node)
 
-    def visit_scope(self, node: AST, locals: List[str] = None):
+    def visit_scope(self, node: AST, fn_scope: bool = False,
+                    locals_: List[str] = ()):
         outer_scope = self.current_scope
-        self.current_scope = Scope.new_local(node, locals)
+        self.current_scope = Scope(
+            item=node, locals_=dict.fromkeys(locals_),
+            fn_scope=fn_scope,
+            parent=outer_scope if outer_scope.fn_scope else outer_scope.parent)
         node._pyo_scope = self.current_scope
         self.generic_visit(node)
         self.current_scope = outer_scope
@@ -84,3 +91,26 @@ class ScopingVisitor(ast.NodeVisitor):
     visit_DictComp = visit_scope
     visit_SetComp = visit_scope
     visit_GeneratorExp = visit_scope
+
+
+def iter_scopes(node: AST) -> Iterator[Scope]:
+    scope: Scope = node._pyo_scope
+    while scope is not None:
+        yield scope
+        scope = scope.parent
+
+
+def search_scope(node: AST, name: str, module_scope=None) -> Optional[Scope]:
+    scope: Scope = node._pyo_scope
+    if name in scope.locals_:
+        return scope
+    elif name in scope.nonlocals_:
+        while scope is not None:
+            if name in scope.locals_:
+                return scope
+            scope = scope.parent
+        else:
+            raise RuntimeError(f"no binding for nonlocal '{name}' found", node)
+
+    # elif name in scope.globals_ or name not in scope.names:
+    return module_scope

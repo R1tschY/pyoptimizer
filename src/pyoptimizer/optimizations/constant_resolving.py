@@ -1,52 +1,86 @@
 # -*- coding=utf-8 -*-
 import ast
-from ast import AST, Assign, Global, Module, Name, Nonlocal, Store
-from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from ast import AST, Assign, Constant, Del, Load, Module, Name, Store
+from copy import deepcopy
+from typing import Any, Dict, Optional
+
+from pyoptimizer.ast.scope import Scope, search_scope
+from pyoptimizer.ast.usages import UsagesVisitor, get_loads, get_stores
+
+NOT_A_CONSTANT = object()
 
 
-@dataclass
-class Scope:
-    local: bool
-    names: List[Name] = field(default_factory=list)
-    global_: List[str] = field(default_factory=list)
-    nonlocal_: List[str] = field(default_factory=list)
-    item: Optional[AST] = None
-    parent: Optional["Scope"] = None
-
-    @classmethod
-    def new_global(cls, item: Optional[AST] = None):
-        return Scope(local=False, item=item)
-
-    @classmethod
-    def new_local(cls, item: Optional[AST] = None):
-        return Scope(local=True, item=item)
+def is_immutable_value(value: object):
+    if value is None:
+        return True
+    elif isinstance(value, (bool, int, complex, str, bytes, float)):
+        return True
+    elif isinstance(value, tuple):
+        return all(map(is_immutable_value, value))
+    else:
+        return False
 
 
-class Scoping(ast.NodeVisitor):
-    current_scope: Scope
+def is_immutable_constant(node: AST):
+    try:
+        value = ast.literal_eval(node)
+    except (ValueError, TypeError):
+        return False
 
-    def __init__(self):
-        self.current_scope = Scope.new_global()
+    return is_immutable_value(value)
 
-    def visit_Name(self, node: Name) -> Any:
-        if node.ctx is Store:
-            self.current_scope.names.append(node)
 
-    def visit_Global(self, node: Global) -> Any:
-        self.current_scope.global_.extend(node.names)
+def get_or_create_constant_info(scope: Scope) -> Dict[str, AST]:
+    if hasattr(scope, "_pyo_constants"):
+        return scope._pyo_constants
 
-    def visit_Nonlocal(self, node: Nonlocal) -> Any:
-        self.current_scope.nonlocal_.extend(node.names)
+    result = {}
+    scope._pyo_constants = result
+    return result
 
-    def visit_Module(self, node: Module) -> Any:
-        self.current_scope = Scope.new_global(node)
-        self.generic_visit(node)
 
-    def visit_FunctionDef(self, node: Module) -> Any:
-        self.current_scope = Scope.new_local(node)
-        self.generic_visit(node)
+def resolve_constants(tree: Module) -> AST:
+    ConstSearcher(tree._pyo_scope).visit(tree)
+    return ConstResolving(tree._pyo_scope).visit(tree)
 
-    def visit_ClassDef(self, node: Module) -> Any:
-        self.current_scope = Scope.new_local(node)
-        self.generic_visit(node)
+
+class ConstSearcher(ast.NodeVisitor):
+    DEPENDS_ON = [UsagesVisitor]
+
+    def __init__(self, module_scope: Scope):
+        self.module_scope = module_scope
+
+    def visit_Assign(self, node: Assign):
+        # TODO: check for Final[int]
+        # TODO: support multiple targets
+        if len(node.targets) == 1 and is_immutable_constant(node.value) \
+                and isinstance(node.targets[0], Name):
+            id = node.targets[0].id
+            scope = search_scope(node.targets[0], id)
+            if scope is None:
+                scope = self.module_scope
+            if len(get_stores(scope, id)) == 1:
+                assert node.targets[0] is get_stores(scope, id)[0]
+                cinfo = get_or_create_constant_info(scope)
+                if id not in cinfo:
+                    cinfo[id] = node.value
+
+
+class ConstResolving(ast.NodeTransformer):
+
+    def __init__(self, module_scope: Scope):
+        self.module_scope = module_scope
+
+    def visit_Name(self, node: Name) -> Optional[AST]:
+        if isinstance(node.ctx, Load):
+            scope = search_scope(node, node.id)
+            if scope is None:
+                scope = self.module_scope
+
+            if hasattr(scope, "_pyo_constants") and \
+                    node.id in scope._pyo_constants:
+                return deepcopy(scope._pyo_constants[node.id])
+
+        return node
+
+

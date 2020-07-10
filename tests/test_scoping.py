@@ -28,6 +28,20 @@ testdata = [
     pytest.param(
         """
             def fn():
+                del a, b
+        """,
+        id="func_scope_del"
+    ),
+    pytest.param(
+        """
+            def fn():
+                a, b = 42, 34
+        """,
+        id="func_scope_assign"
+    ),
+    pytest.param(
+        """
+            def fn():
                 a = 1
                 a = 1
                 a = 1
@@ -160,7 +174,7 @@ def test_func_scope(code):
     ScopingVisitor().visit(tree)
 
     _, locals_ = scoped_exec(code)
-    assert tuple(tree.body[0]._pyo_scope.names) == local_vars(locals_["fn"])
+    assert tuple(tree.body[0]._pyo_scope.locals_) == local_vars(locals_["fn"])
 
 
 def scoped_exec(code: str) -> Tuple[Dict, Dict]:
@@ -172,3 +186,34 @@ def scoped_exec(code: str) -> Tuple[Dict, Dict]:
 
 def local_vars(fn: FunctionType) -> Tuple[str]:
     return fn.__code__.co_varnames
+
+
+
+
+"""
+def a():
+    def b():
+        print(x)
+
+    x = 1
+"""
+
+"""
+def a():
+    def b():
+        global x
+        x = 42
+        print(x)
+
+    x = 1
+"""
+
+"""
+def a():
+    def b():
+        nonlocal x
+        x = 42
+        print(x)
+
+    x = 1
+"""
