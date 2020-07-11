@@ -6,27 +6,27 @@ import pytest
 
 from pyoptimizer.ast.scope import Scope, ScopingVisitor
 from pyoptimizer.ast.usages import UsagesVisitor
-from pyoptimizer.optimizations.constant_resolving import is_immutable_constant, \
-    resolve_constants
+from pyoptimizer.optimizations.constant_resolving import \
+    MUTABLE_CONSTANT, fold_constant, resolve_constants, to_immutable_constant
 
 is_const_testdata = [
-    pytest.param("1", id="int"),
-    pytest.param("1.0", id="float"),
-    pytest.param("1+1j", id="complex"),
-    pytest.param("'abc'", id="str"),
-    pytest.param("(1, (), (1, 23, 3))", id="tuple"),
+    pytest.param("1", 1, id="int"),
+    pytest.param("1.0", 1.0, id="float"),
+    pytest.param("1+1j", 1+1j, id="complex"),
+    pytest.param("'abc'", "abc", id="str"),
+    pytest.param("(1, (), (1, 23, 3))", (1, (), (1, 23, 3)), id="tuple"),
+    pytest.param("1+1", 1+1, id="addition"),
 ]
 
 
-@pytest.mark.parametrize("code", is_const_testdata)
-def test_is_const(code):
+@pytest.mark.parametrize("code,expected", is_const_testdata)
+def test_is_const(code, expected):
     tree: AST = parse(code, mode="eval")
-    assert is_immutable_constant(tree) is True
+    assert fold_constant(tree) == expected
 
 
 is_nonconst_testdata = [
     pytest.param("a"),
-    pytest.param("1+1"),
     pytest.param("[]"),
     pytest.param("{1: 3}"),
 ]
@@ -35,7 +35,7 @@ is_nonconst_testdata = [
 @pytest.mark.parametrize("code", is_nonconst_testdata)
 def test_is_nonconst(code):
     tree: AST = parse(code, mode="eval")
-    assert is_immutable_constant(tree) is False
+    assert to_immutable_constant(tree) is MUTABLE_CONSTANT
 
 
 testdata = [
@@ -93,18 +93,29 @@ testdata = [
         """,
         id="replace constant alias",
     ),
+    # pytest.param(
+    #     """
+    #         ABC = 42
+    #         DEF = (ABC + 1)
+    #         x = DEF
+    #     """,
+    #     """
+    #         ABC = 42
+    #         DEF = (42 + 1)
+    #         x = 43
+    #     """,
+    #     id="computed constant",
+    # ),
     pytest.param(
         """
-            ABC = 42
-            DEF = ABC + 1
-            x = DEF
+            ABC = (True or complex_fn(45, [56]))
+            x = ABC
         """,
         """
-            ABC = 42
-            DEF = (42 + 1)
-            x = 43
+            ABC = (True or complex_fn(45, [56]))
+            x = True
         """,
-        id="computed constant",
+        id="short circuit constant",
     ),
 ]
 

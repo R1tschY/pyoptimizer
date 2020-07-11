@@ -100,7 +100,9 @@ def iter_scopes(node: AST) -> Iterator[Scope]:
         scope = scope.parent
 
 
-def search_scope(node: AST, name: str, module_scope=None) -> Optional[Scope]:
+def search_scope(node: AST, name: str,
+                 module_scope: Optional[Scope] = None,
+                 builtin_scope: Optional[Scope] = None) -> Optional[Scope]:
     scope: Scope = node._pyo_scope
     if name in scope.locals_:
         return scope
@@ -113,4 +115,14 @@ def search_scope(node: AST, name: str, module_scope=None) -> Optional[Scope]:
             raise RuntimeError(f"no binding for nonlocal '{name}' found", node)
 
     # elif name in scope.globals_ or name not in scope.names:
-    return module_scope
+    if module_scope is None:
+        return None
+
+    if name in module_scope.locals_:
+        return module_scope
+
+    if builtin_scope is None:
+        return None
+
+    if name in builtin_scope.locals_:
+        return builtin_scope

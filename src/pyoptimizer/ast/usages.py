@@ -27,9 +27,10 @@ class UsagesVisitor(NodeVisitor):
         self.module_scope = module_scope
 
     def visit_Name(self, node: Name) -> Any:
-        scope = search_scope(node, node.id)
+        scope = search_scope(node, node.id, self.module_scope)
         if scope is None:
-            scope = self.module_scope
+            return  # builtin or unresolved name
+
         scope.locals_[node.id].append(node)
 
     def visit_Global(self, node: Global) -> Any:
@@ -39,6 +40,8 @@ class UsagesVisitor(NodeVisitor):
     def visit_Nonlocal(self, node: Nonlocal) -> Any:
         for name in node.names:
             scope = search_scope(node, name)
+            if scope is None:
+                return  # unresolved
             scope.locals_[name].append(node)
 
 
