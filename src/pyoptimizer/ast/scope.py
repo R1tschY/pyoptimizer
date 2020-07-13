@@ -1,4 +1,6 @@
 # -*- coding=utf-8 -*-
+import weakref
+from weakref import ReferenceType
 from ast import AST, AsyncFunctionDef, ClassDef, Del, FunctionDef, Global, \
     Name, \
     NodeVisitor, Nonlocal, \
@@ -15,6 +17,7 @@ class Scope:
     locals_: Dict[str, List[AST]] = field(default_factory=list)
     globals_: List[str] = field(default_factory=list)
     nonlocals_: List[str] = field(default_factory=list)
+    children: List[ReferenceType] = field(default_factory=list)
 
     @classmethod
     def new_global(cls, item: Optional[AST] = None):
@@ -29,6 +32,9 @@ class Scope:
 
     def is_class_scope(self):
         return isinstance(self.item, ClassDef)
+
+    def is_function_scope(self):
+        return isinstance(self.item, (FunctionDef, AsyncFunctionDef))
 
 
 class ScopingVisitor(NodeVisitor):
