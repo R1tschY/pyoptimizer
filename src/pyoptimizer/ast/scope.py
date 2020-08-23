@@ -106,6 +106,12 @@ def iter_scopes(node: AST) -> Iterator[Scope]:
         scope = scope.parent
 
 
+def search_name_scope(
+        node: Name, module_scope: Optional[Scope] = None,
+        builtin_scope: Optional[Scope] = None) -> Optional[Scope]:
+    return search_scope(node, node.id, module_scope, builtin_scope)
+
+
 def search_scope(node: AST, name: str,
                  module_scope: Optional[Scope] = None,
                  builtin_scope: Optional[Scope] = None) -> Optional[Scope]:

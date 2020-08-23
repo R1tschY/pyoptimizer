@@ -1,4 +1,5 @@
 # -*- coding=utf-8 -*-
+import ast
 from ast import (AST, Add, And, Assign, BinOp, BitAnd, BitOr, BitXor, BoolOp,
                  Bytes, Compare, Constant, Div, Expression, FloorDiv, IfExp,
                  Invert, LShift, Load, MatMult, Mod, Module, Mult, Name,
@@ -10,52 +11,25 @@ from operator import (__add__, __and__, __floordiv__, __invert__, __lshift__,
                       __pow__, __rshift__, __sub__, __truediv__, __xor__)
 from typing import Any, Dict, Optional
 
+from pyoptimizer.ast.constants import BIN_OPS, BOOL_OPS, UNARY_OPS
 from pyoptimizer.ast.scope import Scope, search_scope
 from pyoptimizer.ast.usages import UsagesVisitor, get_stores
 
 NOT_A_CONSTANT = object()
 MUTABLE_CONSTANT = object()
 
-boolops = {
-    And: all,
-    Or: any,
-}
-
-binops = {
-    Add: __add__,
-    Sub: __sub__,
-    Mult: __mul__,
-    MatMult: __matmul__,
-    Div: __truediv__,
-    Mod: __mod__,
-    Pow: __pow__,
-    LShift: __lshift__,
-    RShift: __rshift__,
-    BitOr: __or__,
-    BitXor: __xor__,
-    BitAnd: __and__,
-    FloorDiv: __floordiv__,
-}
-
-unaryops = {
-    Invert: __invert__,
-    Not: __not__,
-    UAdd: lambda x: x,
-    USub: __neg__
-}
-
 
 def fold_constant(tree: expr) -> Any:
     # TODO: FormattedValue, JoinedStr, Name on builtin
 
     if isinstance(tree, BoolOp):
-        return boolops[type(tree.op)](
+        return BOOL_OPS[type(tree.op)](
             fold_constant(expr) for expr in tree.values)
     elif isinstance(tree, BinOp):
-        return binops[type(tree.op)](
+        return BIN_OPS[type(tree.op)](
             fold_constant(tree.left), fold_constant(tree.right))
     elif isinstance(tree, UnaryOp):
-        return unaryops[type(tree.op)](fold_constant(tree.operand))
+        return UNARY_OPS[type(tree.op)](fold_constant(tree.operand))
     elif isinstance(tree, IfExp):
         if fold_constant(tree.test):
             return fold_constant(tree.body)
@@ -85,17 +59,11 @@ def to_immutable_constant(node: AST):
         return MUTABLE_CONSTANT
 
 
-def constant_to_ast(value: object) -> expr:
+def value_to_ast(value: object) -> expr:
     # TODO: complex
-    if isinstance(value, (str, int, float, bytes, bool)):
-        constant = Constant(value)
-        constant.kind = None
-        return constant
-    elif value is None:
-        constant = Constant(None)
-        constant.kind = None
-        return constant
-    else:
+    try:
+        return ast.parse(repr(value), mode="eval").body
+    except SyntaxError:
         raise RuntimeError(f"Failed to convert {value!r} to ast")
 
 
@@ -144,7 +112,7 @@ class ConstResolving(NodeTransformer):
             scope = search_scope(node, node.id, self.module_scope)
             if scope is not None and hasattr(scope, "_pyo_constants") and \
                     node.id in scope._pyo_constants:
-                return constant_to_ast(scope._pyo_constants[node.id])
+                return value_to_ast(scope._pyo_constants[node.id])
 
         return node
 

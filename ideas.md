@@ -15,3 +15,9 @@
 * remove unused inner-functions/_-functions
 * cache builtins/imports in kwargs
 * convert "" % () and "".format to f-strings
+
+
+# TODOs
+
+* Scope: analyse imports
+* Usages: analyse imports
